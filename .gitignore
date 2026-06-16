@@ -104,3 +104,6 @@ apps/piface/libmcp23s17/
 apps/piface/libpifacedigital/
 
 *.vcxproj.user
+
+# Claude Code local (personal) settings
+.claude/settings.local.json
