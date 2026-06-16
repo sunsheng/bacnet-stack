@@ -24,16 +24,14 @@ jobs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -qq gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
-    # Static link (-static): the device glibc is old ("GNU/Linux 2.6.32"),
-    # so a binary dynamically linked against the runner's modern glibc would
-    # fail with GLIBC version errors. Static linking bundles libc, making the
-    # executables self-contained and portable across the device's rootfs.
-    - name: Build Demo Apps BBMD=client (armhf static cross-compile)
+    # Dynamically linked: the device ships the armhf loader
+    # (/lib/ld-linux-armhf.so.3), so binaries resolve libc at runtime.
+    - name: Build Demo Apps BBMD=client (armhf cross-compile)
       run: |
         arm-linux-gnueabihf-gcc --version
         make clean
         make LEGACY=true BBMD=client \
-          CC="arm-linux-gnueabihf-gcc -mcpu=cortex-a53 -static" \
+          CC="arm-linux-gnueabihf-gcc -mcpu=cortex-a53" \
           AR=arm-linux-gnueabihf-ar \
           all
     - name: Collect armhf binaries
@@ -45,7 +43,7 @@ jobs:
             cp "$f" artifacts/
           fi
         done
-        echo "Collected binaries (expect 'statically linked'):"
+        echo "Collected binaries:"
         file artifacts/* || true
     - name: Upload armhf binaries
       uses: actions/upload-artifact@v4
