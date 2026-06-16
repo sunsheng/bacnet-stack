@@ -22,23 +22,24 @@ jobs:
     # The runner's own glibc (2.39) is too new: a binary linked against it
     # fails on-device with "GLIBC_2.34 not found". Instead of apt (which only
     # offers the runner's modern glibc), download a prebuilt cross toolchain
-    # that bundles an OLD glibc. Linaro 7.5 ships glibc 2.25, so the binaries
-    # require only GLIBC <= 2.25 and run on the device's glibc 2.31.
-    - name: Download ARM cross toolchain (arm-linux-gnueabihf, glibc 2.25)
+    # that bundles glibc 2.31. The Arm GNU Toolchain 10.2-2020.11 ships glibc
+    # 2.31 (== the device), so the binaries require only GLIBC <= 2.31.
+    - name: Download ARM cross toolchain (arm-none-linux-gnueabihf, glibc 2.31)
       run: |
-        TC_URL="https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/arm-linux-gnueabihf/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabihf.tar.xz"
+        TC_URL="https://developer.arm.com/-/media/Files/downloads/gnu-a/10.2-2020.11/binrel/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz"
         mkdir -p "$HOME/toolchain"
-        curl -fSL --retry 3 "$TC_URL" -o /tmp/toolchain.tar.xz
+        curl -fSL --retry 3 --retry-delay 5 "$TC_URL" -o /tmp/toolchain.tar.xz
         tar -xf /tmp/toolchain.tar.xz -C "$HOME/toolchain" --strip-components=1
-        # expose arm-linux-gnueabihf-* to subsequent steps
+        # expose arm-none-linux-gnueabihf-* to subsequent steps
         echo "$HOME/toolchain/bin" >> "$GITHUB_PATH"
-    - name: Build Demo Apps BBMD=client (armhf cross-compile, glibc 2.25)
+        "$HOME/toolchain/bin/arm-none-linux-gnueabihf-gcc" --version
+    - name: Build Demo Apps BBMD=client (armhf cross-compile, glibc 2.31)
       run: |
-        arm-linux-gnueabihf-gcc --version
+        arm-none-linux-gnueabihf-gcc --version
         make clean
         make LEGACY=true BBMD=client \
-          CC="arm-linux-gnueabihf-gcc -mcpu=cortex-a53" \
-          AR=arm-linux-gnueabihf-ar \
+          CC="arm-none-linux-gnueabihf-gcc -mcpu=cortex-a53" \
+          AR=arm-none-linux-gnueabihf-ar \
           all
     - name: Collect armhf binaries
       run: |
