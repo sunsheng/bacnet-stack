@@ -15,18 +15,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     # Target device:
-    #   Kernel: Linux 4.14.98 aarch64 (64-bit), CPU part 0xd03 => Cortex-A53
-    #   Userspace/rootfs: 32-bit ARM hard-float (armhf), EABI5,
-    #     interpreter /lib/ld-linux-armhf.so.3, built for GNU/Linux 2.6.32.
-    # The aarch64 kernel runs 32-bit ARM (AArch32) binaries, and the rootfs
-    # only ships the 32-bit loader, so binaries MUST be built for armhf.
-    - name: Create Build Environment
+    #   Kernel: Linux 4.14.98 aarch64 (64-bit); CPU Cortex-A53 (part 0xd03)
+    #   Userspace: 32-bit ARM hard-float (armhf), glibc 2.31,
+    #     loader /lib/ld-linux-armhf.so.3 -> ld-2.31.so
+    #
+    # The runner's own glibc (2.39) is too new: a binary linked against it
+    # fails on-device with "GLIBC_2.34 not found". Instead of apt (which only
+    # offers the runner's modern glibc), download a prebuilt cross toolchain
+    # that bundles an OLD glibc. Linaro 7.5 ships glibc 2.25, so the binaries
+    # require only GLIBC <= 2.25 and run on the device's glibc 2.31.
+    - name: Download ARM cross toolchain (arm-linux-gnueabihf, glibc 2.25)
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -qq gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
-    # Dynamically linked: the device ships the armhf loader
-    # (/lib/ld-linux-armhf.so.3), so binaries resolve libc at runtime.
-    - name: Build Demo Apps BBMD=client (armhf cross-compile)
+        TC_URL="https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/arm-linux-gnueabihf/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabihf.tar.xz"
+        mkdir -p "$HOME/toolchain"
+        curl -fSL --retry 3 "$TC_URL" -o /tmp/toolchain.tar.xz
+        tar -xf /tmp/toolchain.tar.xz -C "$HOME/toolchain" --strip-components=1
+        # expose arm-linux-gnueabihf-* to subsequent steps
+        echo "$HOME/toolchain/bin" >> "$GITHUB_PATH"
+    - name: Build Demo Apps BBMD=client (armhf cross-compile, glibc 2.25)
       run: |
         arm-linux-gnueabihf-gcc --version
         make clean
