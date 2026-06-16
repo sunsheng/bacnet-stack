@@ -1,4 +1,4 @@
-name: GCC aarch64 cross-compile
+name: GCC armhf cross-compile
 
 on:
   push:
@@ -14,35 +14,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    # Target device (uname -a / cpuinfo):
-    #   Linux 4.14.98 aarch64 GNU/Linux
-    #   ARMv8-A, CPU implementer 0x41 (ARM), CPU part 0xd03 => Cortex-A53
+    # Target device:
+    #   Kernel: Linux 4.14.98 aarch64 (64-bit), CPU part 0xd03 => Cortex-A53
+    #   Userspace/rootfs: 32-bit ARM hard-float (armhf), EABI5,
+    #     interpreter /lib/ld-linux-armhf.so.3, built for GNU/Linux 2.6.32.
+    # The aarch64 kernel runs 32-bit ARM (AArch32) binaries, and the rootfs
+    # only ships the 32-bit loader, so binaries MUST be built for armhf.
     - name: Create Build Environment
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-    - name: Build Demo Apps BBMD=client (aarch64 cross-compile)
+        sudo apt-get install -qq gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+    # Static link (-static): the device glibc is old ("GNU/Linux 2.6.32"),
+    # so a binary dynamically linked against the runner's modern glibc would
+    # fail with GLIBC version errors. Static linking bundles libc, making the
+    # executables self-contained and portable across the device's rootfs.
+    - name: Build Demo Apps BBMD=client (armhf static cross-compile)
       run: |
-        aarch64-linux-gnu-gcc --version
+        arm-linux-gnueabihf-gcc --version
         make clean
         make LEGACY=true BBMD=client \
-          CC="aarch64-linux-gnu-gcc -mcpu=cortex-a53" \
-          AR=aarch64-linux-gnu-ar \
+          CC="arm-linux-gnueabihf-gcc -mcpu=cortex-a53 -static" \
+          AR=arm-linux-gnueabihf-ar \
           all
-    - name: Collect aarch64 binaries
+    - name: Collect armhf binaries
       run: |
         mkdir -p artifacts
         # copy only the cross-compiled ELF executables, skip the shell scripts
         for f in bin/*; do
-          if [ -f "$f" ] && file "$f" | grep -q "ELF 64-bit.*aarch64"; then
+          if [ -f "$f" ] && file "$f" | grep -q "ELF 32-bit.*ARM"; then
             cp "$f" artifacts/
           fi
         done
-        echo "Collected binaries:"
+        echo "Collected binaries (expect 'statically linked'):"
         file artifacts/* || true
-    - name: Upload aarch64 binaries
+    - name: Upload armhf binaries
       uses: actions/upload-artifact@v4
       with:
-        name: bacnet-bip-client-aarch64
+        name: bacnet-bip-client-armhf
         path: artifacts/
         if-no-files-found: error
