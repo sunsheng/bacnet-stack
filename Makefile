@@ -4,6 +4,12 @@
 # (see http://www.gnu.org/software/automake/manual/make/Special-Targets.html)
 .EXPORT_ALL_VARIABLES:
 
+# binutils 'size' tool used by the app Makefiles to report binary footprint.
+# Default to the host 'size'; override for cross builds, e.g.
+#   make SIZE=arm-none-linux-gnueabihf-size ...
+# Exported via .EXPORT_ALL_VARIABLES so every app sub-make inherits it.
+SIZE ?= size
+
 # all: demos router-ipv6 ${DEMO_LINUX}
 
 .PHONY: all

@@ -55,7 +55,7 @@ all: ${BACNET_LIB_TARGET} Makefile ${TARGET_BIN}
 
 ${TARGET_BIN}: ${OBJS} Makefile ${BACNET_LIB_TARGET}
 	${CC} ${PFLAGS} ${OBJS} ${LFLAGS} -o $@
-	size $@
+	$(SIZE) $@
 	cp $@ ../../bin
 
 ${BACNET_LIB_TARGET}:

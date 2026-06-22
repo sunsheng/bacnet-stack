@@ -63,7 +63,7 @@ all: Makefile ${TARGET_BIN}
 
 ${TARGET_BIN}: ${OBJS}
 	${CC} ${PFLAGS} ${OBJS} ${LFLAGS} -o $@
-	size $@
+	$(SIZE) $@
 	cp $@ ../../bin
 
 .c.o:
