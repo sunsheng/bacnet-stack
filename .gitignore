@@ -67,6 +67,11 @@ BACnet_BDT_table
 address_cache
 **/build/*
 **/_build/*
+# cross-compile output directories (see doc/cross-compile.md)
+/build-arm32/
+/build-arm32-musl/
+/build-win32/
+/build-win64/
 **/out/*
 **/external/*
 Obj/
