@@ -1,0 +1,139 @@
+name: Cross-build and Release
+
+# Builds the stack for 5 targets and, on a version tag, publishes the
+# packaged binaries as GitHub Release assets.
+#
+#   - linux-arm32-glibc : Arm GNU-A 10.2 (glibc 2.31), dynamic
+#   - linux-arm32-musl  : musl, fully static
+#   - linux-x86_64-musl : musl, fully static
+#   - windows-x86       : MinGW-w64 i686, static
+#   - windows-x64       : MinGW-w64 x86_64, static
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  ARM_GNU_URL: https://developer.arm.com/-/media/files/downloads/gnu-a/10.2-2020.11/binrel/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz
+  ARM_MUSL_URL: https://musl.cc/arm-linux-musleabihf-cross.tgz
+  X86_64_MUSL_URL: https://musl.cc/x86_64-linux-musl-cross.tgz
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-arm32-glibc
+            toolchain: cmake/toolchain-arm-linux-gnueabihf.cmake
+            pkgext: tar.gz
+          - target: linux-arm32-musl
+            toolchain: cmake/toolchain-arm-musl-static.cmake
+            pkgext: tar.gz
+          - target: linux-x86_64-musl
+            toolchain: cmake/toolchain-x86_64-musl-static.cmake
+            pkgext: tar.gz
+          - target: windows-x86
+            toolchain: cmake/toolchain-mingw-i686.cmake
+            pkgext: zip
+          - target: windows-x64
+            toolchain: cmake/toolchain-mingw-x86_64.cmake
+            pkgext: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install base tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build zip xz-utils
+
+      - name: Setup MinGW-w64 (Windows x86)
+        if: matrix.target == 'windows-x86'
+        run: sudo apt-get install -y gcc-mingw-w64-i686
+
+      - name: Setup MinGW-w64 (Windows x64)
+        if: matrix.target == 'windows-x64'
+        run: sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Setup Arm GNU-A toolchain (glibc)
+        if: matrix.target == 'linux-arm32-glibc'
+        run: |
+          mkdir -p "$HOME/toolchains" && cd "$HOME/toolchains"
+          curl -fL --retry 3 -o arm-gnu.tar.xz "$ARM_GNU_URL"
+          tar xf arm-gnu.tar.xz
+          echo "EXTRA_CMAKE=-DARM_TOOLCHAIN_ROOT=$HOME/toolchains/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf" >> "$GITHUB_ENV"
+
+      - name: Setup musl toolchain (arm)
+        if: matrix.target == 'linux-arm32-musl'
+        run: |
+          mkdir -p "$HOME/toolchains" && cd "$HOME/toolchains"
+          curl -fL --retry 3 -o arm-musl.tgz "$ARM_MUSL_URL"
+          tar xf arm-musl.tgz
+          echo "EXTRA_CMAKE=-DARM_MUSL_TOOLCHAIN_ROOT=$HOME/toolchains/arm-linux-musleabihf-cross" >> "$GITHUB_ENV"
+
+      - name: Setup musl toolchain (x86_64)
+        if: matrix.target == 'linux-x86_64-musl'
+        run: |
+          mkdir -p "$HOME/toolchains" && cd "$HOME/toolchains"
+          curl -fL --retry 3 -o x86_64-musl.tgz "$X86_64_MUSL_URL"
+          tar xf x86_64-musl.tgz
+          echo "EXTRA_CMAKE=-DX86_64_MUSL_TOOLCHAIN_ROOT=$HOME/toolchains/x86_64-linux-musl-cross" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${{ matrix.toolchain }}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            $EXTRA_CMAKE
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Package
+        id: package
+        run: |
+          ver="${GITHUB_REF_NAME//\//-}"
+          pkg="bacnet-stack-${ver}-${{ matrix.target }}"
+          mkdir -p "dist/$pkg"
+          # collect executables and the static library
+          find build -maxdepth 1 -type f \( -perm -u+x -o -name '*.exe' \) ! -name '*.cmake' \
+            -exec cp {} "dist/$pkg/" \;
+          cp build/libbacnet-stack.a "dist/$pkg/" 2>/dev/null || true
+          ( cd dist
+            if [ "${{ matrix.pkgext }}" = "zip" ]; then
+              zip -r "$pkg.zip" "$pkg"
+            else
+              tar czf "$pkg.tar.gz" "$pkg"
+            fi )
+          ls -lh "dist/$pkg.${{ matrix.pkgext }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.${{ matrix.pkgext }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+          || gh release upload "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" --clobber
