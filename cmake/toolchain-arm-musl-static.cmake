@@ -35,6 +35,9 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
 # Make CMake's compiler/link checks use static too, so feature detection matches
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
+# Forward the root to CMake's try_compile sub-project (see arm glibc toolchain).
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES ARM_MUSL_TOOLCHAIN_ROOT)
+
 set(CMAKE_FIND_ROOT_PATH "${ARM_MUSL_TOOLCHAIN_ROOT}")
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
