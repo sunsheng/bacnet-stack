@@ -3,11 +3,11 @@ name: Cross-build and Release
 # Builds the stack for 5 targets and, on a version tag, publishes the
 # packaged binaries as GitHub Release assets.
 #
-#   - linux-arm32-glibc : Arm GNU-A 10.2 (glibc 2.31), dynamic
-#   - linux-arm32-musl  : musl, fully static
-#   - linux-x86_64-musl : musl, fully static
-#   - windows-x86       : MinGW-w64 i686, static
-#   - windows-x64       : MinGW-w64 x86_64, static
+#   - linux-arm32-glibc : Arm GNU-A 10.2 (glibc 2.31), dynamic  (cross, ubuntu)
+#   - linux-arm32-musl  : musl, fully static                    (cross, ubuntu)
+#   - linux-x86_64-musl : musl, fully static                    (cross, ubuntu)
+#   - windows-x86       : native MSVC, Win32                    (windows-latest)
+#   - windows-x64       : native MSVC, x64                      (windows-latest)
 
 on:
   push:
@@ -20,46 +20,46 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: linux-arm32-glibc
+            os: ubuntu-latest
             toolchain: cmake/toolchain-arm-linux-gnueabihf.cmake
             pkgext: tar.gz
             tc_url: https://developer.arm.com/-/media/files/downloads/gnu-a/10.2-2020.11/binrel/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz
             tc_dir: gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf
             tc_var: ARM_TOOLCHAIN_ROOT
           - target: linux-arm32-musl
+            os: ubuntu-latest
             toolchain: cmake/toolchain-arm-musl-static.cmake
             pkgext: tar.gz
             tc_url: https://github.com/sunsheng/bacnet-stack/releases/download/toolchains-musl/arm-linux-musleabihf-cross.tgz
             tc_dir: arm-linux-musleabihf-cross
             tc_var: ARM_MUSL_TOOLCHAIN_ROOT
           - target: linux-x86_64-musl
+            os: ubuntu-latest
             toolchain: cmake/toolchain-x86_64-musl-static.cmake
             pkgext: tar.gz
             tc_url: https://github.com/sunsheng/bacnet-stack/releases/download/toolchains-musl/x86_64-linux-musl-cross.tgz
             tc_dir: x86_64-linux-musl-cross
             tc_var: X86_64_MUSL_TOOLCHAIN_ROOT
           - target: windows-x86
-            toolchain: cmake/toolchain-mingw-i686.cmake
+            os: windows-latest
+            arch: Win32
             pkgext: zip
-            apt: gcc-mingw-w64-i686
           - target: windows-x64
-            toolchain: cmake/toolchain-mingw-x86_64.cmake
+            os: windows-latest
+            arch: x64
             pkgext: zip
-            apt: gcc-mingw-w64-x86-64
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install base tools
+      - name: Install base tools (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build zip xz-utils
-
-      - name: Install apt toolchain
-        if: matrix.apt != ''
-        run: sudo apt-get install -y ${{ matrix.apt }}
 
       - name: Cache downloaded toolchain
         if: matrix.tc_url != ''
@@ -89,26 +89,49 @@ jobs:
         run: echo "EXTRA_CMAKE=-D${{ matrix.tc_var }}=$HOME/toolchains/${{ matrix.tc_dir }}" >> "$GITHUB_ENV"
 
       - name: Configure
+        shell: bash
         run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="${{ matrix.toolchain }}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            $EXTRA_CMAKE
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # Native build with the runner's Visual Studio toolset; -A picks the
+            # target architecture. Static CRT so the .exe needs no VC redist.
+            cmake -B build -A "${{ matrix.arch }}" \
+              -DCMAKE_POLICY_DEFAULT_CMP0091=NEW \
+              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          else
+            cmake -B build -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE="${{ matrix.toolchain }}" \
+              -DCMAKE_BUILD_TYPE=Release \
+              $EXTRA_CMAKE
+          fi
 
       - name: Build
-        run: cmake --build build -j
+        shell: bash
+        run: cmake --build build --config Release -j
 
       - name: Package
+        id: package
+        shell: bash
         run: |
           ver="${GITHUB_REF_NAME//\//-}"
           pkg="bacnet-stack-${ver}-${{ matrix.target }}"
           mkdir -p "dist/$pkg"
-          find build -maxdepth 1 -type f \( -perm -u+x -o -name '*.exe' \) ! -name '*.cmake' \
+          # Multi-config generators (MSVC) emit into build/Release/; single-config
+          # (Ninja) emits straight into build/.
+          bindir=build
+          [ -d build/Release ] && bindir=build/Release
+          # collect executables and the static library
+          find "$bindir" -maxdepth 1 -type f \( -perm -u+x -o -name '*.exe' \) ! -name '*.cmake' \
             -exec cp {} "dist/$pkg/" \;
-          cp build/libbacnet-stack.a "dist/$pkg/" 2>/dev/null || true
+          cp "$bindir"/libbacnet-stack.a "dist/$pkg/" 2>/dev/null || true
+          cp "$bindir"/bacnet-stack.lib "dist/$pkg/" 2>/dev/null || true
           ( cd dist
             if [ "${{ matrix.pkgext }}" = "zip" ]; then
-              zip -r "$pkg.zip" "$pkg"
+              if command -v zip >/dev/null 2>&1; then
+                zip -r "$pkg.zip" "$pkg"
+              else
+                # windows runners ship 7-Zip but not Info-ZIP
+                7z a "$pkg.zip" "$pkg" >/dev/null
+              fi
             else
               tar czf "$pkg.tar.gz" "$pkg"
             fi )
