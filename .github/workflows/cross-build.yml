@@ -34,13 +34,13 @@ jobs:
           - target: linux-arm32-musl
             toolchain: cmake/toolchain-arm-musl-static.cmake
             pkgext: tar.gz
-            tc_url: https://musl.cc/arm-linux-musleabihf-cross.tgz
+            tc_url: https://github.com/sunsheng/bacnet-stack/releases/download/toolchains-musl/arm-linux-musleabihf-cross.tgz
             tc_dir: arm-linux-musleabihf-cross
             tc_var: ARM_MUSL_TOOLCHAIN_ROOT
           - target: linux-x86_64-musl
             toolchain: cmake/toolchain-x86_64-musl-static.cmake
             pkgext: tar.gz
-            tc_url: https://musl.cc/x86_64-linux-musl-cross.tgz
+            tc_url: https://github.com/sunsheng/bacnet-stack/releases/download/toolchains-musl/x86_64-linux-musl-cross.tgz
             tc_dir: x86_64-linux-musl-cross
             tc_var: X86_64_MUSL_TOOLCHAIN_ROOT
           - target: windows-x86
@@ -75,15 +75,9 @@ jobs:
           set -e
           mkdir -p "$HOME/toolchains" && cd "$HOME/toolchains"
           url="${{ matrix.tc_url }}"
-          alt="${url/https:\/\/musl.cc/https:\/\/more.musl.cc}"
-          ok=
-          for u in "$url" "$alt"; do
-            echo "Downloading $u"
-            if curl -fL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 900 \
-                 -o tc.archive "$u"; then ok=1; break; fi
-            echo "retry with next mirror..."
-          done
-          [ -n "$ok" ] || { echo "toolchain download failed"; exit 1; }
+          echo "Downloading $url"
+          curl -fL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 900 \
+            -o tc.archive "$url"
           case "$url" in
             *.tar.xz) tar xf tc.archive ;;
             *)        tar xzf tc.archive ;;
