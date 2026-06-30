@@ -28,6 +28,11 @@ set(CMAKE_STRIP        "${CROSS_PREFIX}strip")
 # Sysroot shipped with the toolchain (provides glibc 2.31 headers/libs)
 set(CMAKE_SYSROOT "${ARM_TOOLCHAIN_ROOT}/arm-none-linux-gnueabihf/libc")
 
+# Forward the root to CMake's try_compile sub-project, otherwise it re-reads
+# this file without ARM_TOOLCHAIN_ROOT and CMAKE_SYSROOT falls back to the
+# hardcoded default (compiler-ABI check then fails to find crt1.o).
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES ARM_TOOLCHAIN_ROOT)
+
 # ARMv7-A hard-float
 set(ARM_FLAGS "-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard")
 set(CMAKE_C_FLAGS_INIT   "${ARM_FLAGS}")

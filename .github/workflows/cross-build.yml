@@ -18,11 +18,6 @@ on:
 permissions:
   contents: write
 
-env:
-  ARM_GNU_URL: https://developer.arm.com/-/media/files/downloads/gnu-a/10.2-2020.11/binrel/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz
-  ARM_MUSL_URL: https://musl.cc/arm-linux-musleabihf-cross.tgz
-  X86_64_MUSL_URL: https://musl.cc/x86_64-linux-musl-cross.tgz
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,55 +28,71 @@ jobs:
           - target: linux-arm32-glibc
             toolchain: cmake/toolchain-arm-linux-gnueabihf.cmake
             pkgext: tar.gz
+            tc_url: https://developer.arm.com/-/media/files/downloads/gnu-a/10.2-2020.11/binrel/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf.tar.xz
+            tc_dir: gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf
+            tc_var: ARM_TOOLCHAIN_ROOT
           - target: linux-arm32-musl
             toolchain: cmake/toolchain-arm-musl-static.cmake
             pkgext: tar.gz
+            tc_url: https://musl.cc/arm-linux-musleabihf-cross.tgz
+            tc_dir: arm-linux-musleabihf-cross
+            tc_var: ARM_MUSL_TOOLCHAIN_ROOT
           - target: linux-x86_64-musl
             toolchain: cmake/toolchain-x86_64-musl-static.cmake
             pkgext: tar.gz
+            tc_url: https://musl.cc/x86_64-linux-musl-cross.tgz
+            tc_dir: x86_64-linux-musl-cross
+            tc_var: X86_64_MUSL_TOOLCHAIN_ROOT
           - target: windows-x86
             toolchain: cmake/toolchain-mingw-i686.cmake
             pkgext: zip
+            apt: gcc-mingw-w64-i686
           - target: windows-x64
             toolchain: cmake/toolchain-mingw-x86_64.cmake
             pkgext: zip
+            apt: gcc-mingw-w64-x86-64
     steps:
       - uses: actions/checkout@v4
 
       - name: Install base tools
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build zip xz-utils
 
-      - name: Setup MinGW-w64 (Windows x86)
-        if: matrix.target == 'windows-x86'
-        run: sudo apt-get install -y gcc-mingw-w64-i686
+      - name: Install apt toolchain
+        if: matrix.apt != ''
+        run: sudo apt-get install -y ${{ matrix.apt }}
 
-      - name: Setup MinGW-w64 (Windows x64)
-        if: matrix.target == 'windows-x64'
-        run: sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Cache downloaded toolchain
+        if: matrix.tc_url != ''
+        id: tc-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/toolchains/${{ matrix.tc_dir }}
+          key: toolchain-${{ matrix.target }}-${{ matrix.tc_dir }}
 
-      - name: Setup Arm GNU-A toolchain (glibc)
-        if: matrix.target == 'linux-arm32-glibc'
+      - name: Download toolchain
+        if: matrix.tc_url != '' && steps.tc-cache.outputs.cache-hit != 'true'
         run: |
+          set -e
           mkdir -p "$HOME/toolchains" && cd "$HOME/toolchains"
-          curl -fL --retry 3 -o arm-gnu.tar.xz "$ARM_GNU_URL"
-          tar xf arm-gnu.tar.xz
-          echo "EXTRA_CMAKE=-DARM_TOOLCHAIN_ROOT=$HOME/toolchains/gcc-arm-10.2-2020.11-x86_64-arm-none-linux-gnueabihf" >> "$GITHUB_ENV"
+          url="${{ matrix.tc_url }}"
+          alt="${url/https:\/\/musl.cc/https:\/\/more.musl.cc}"
+          ok=
+          for u in "$url" "$alt"; do
+            echo "Downloading $u"
+            if curl -fL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 900 \
+                 -o tc.archive "$u"; then ok=1; break; fi
+            echo "retry with next mirror..."
+          done
+          [ -n "$ok" ] || { echo "toolchain download failed"; exit 1; }
+          case "$url" in
+            *.tar.xz) tar xf tc.archive ;;
+            *)        tar xzf tc.archive ;;
+          esac
+          rm -f tc.archive
 
-      - name: Setup musl toolchain (arm)
-        if: matrix.target == 'linux-arm32-musl'
-        run: |
-          mkdir -p "$HOME/toolchains" && cd "$HOME/toolchains"
-          curl -fL --retry 3 -o arm-musl.tgz "$ARM_MUSL_URL"
-          tar xf arm-musl.tgz
-          echo "EXTRA_CMAKE=-DARM_MUSL_TOOLCHAIN_ROOT=$HOME/toolchains/arm-linux-musleabihf-cross" >> "$GITHUB_ENV"
-
-      - name: Setup musl toolchain (x86_64)
-        if: matrix.target == 'linux-x86_64-musl'
-        run: |
-          mkdir -p "$HOME/toolchains" && cd "$HOME/toolchains"
-          curl -fL --retry 3 -o x86_64-musl.tgz "$X86_64_MUSL_URL"
-          tar xf x86_64-musl.tgz
-          echo "EXTRA_CMAKE=-DX86_64_MUSL_TOOLCHAIN_ROOT=$HOME/toolchains/x86_64-linux-musl-cross" >> "$GITHUB_ENV"
+      - name: Set toolchain root
+        if: matrix.tc_var != ''
+        run: echo "EXTRA_CMAKE=-D${{ matrix.tc_var }}=$HOME/toolchains/${{ matrix.tc_dir }}" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
@@ -94,12 +105,10 @@ jobs:
         run: cmake --build build -j
 
       - name: Package
-        id: package
         run: |
           ver="${GITHUB_REF_NAME//\//-}"
           pkg="bacnet-stack-${ver}-${{ matrix.target }}"
           mkdir -p "dist/$pkg"
-          # collect executables and the static library
           find build -maxdepth 1 -type f \( -perm -u+x -o -name '*.exe' \) ! -name '*.cmake' \
             -exec cp {} "dist/$pkg/" \;
           cp build/libbacnet-stack.a "dist/$pkg/" 2>/dev/null || true
